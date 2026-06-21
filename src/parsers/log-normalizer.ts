@@ -8,6 +8,9 @@ export interface NormalizedLine {
         level?: string;
         requestId?: string;
         prefix?: string; // everything stripped from the start
+        kvPairs?: Record<string, string>;
+        isContinuation?: boolean;
+        logFormat?: 'json' | 'kv' | 'text';
     };
 }
 
@@ -64,6 +67,16 @@ export function normalizeLine(line: string, index: number): NormalizedLine {
         }
     }
 
+    const kvPairs = extractKeyValuePairs(normalizedText);
+    
+    let logFormat: 'json' | 'kv' | 'text' = 'text';
+    const trimmed = normalizedText.trim();
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+        logFormat = 'json';
+    } else if (kvPairs && Object.keys(kvPairs).length > 0) {
+        logFormat = 'kv';
+    }
+
     return {
         originalIndex: index,
         originalText: line,
@@ -73,8 +86,59 @@ export function normalizeLine(line: string, index: number): NormalizedLine {
             level,
             requestId,
             prefix,
+            kvPairs,
+            logFormat,
         },
     };
+}
+
+/**
+ * Extracts key=value and key="value" pairs from a string.
+ */
+export function extractKeyValuePairs(line: string): Record<string, string> | undefined {
+    const kvPairs: Record<string, string> = {};
+    const kvRegex = /([a-zA-Z0-9_.-]+)=("([^"\\]*(?:\\.[^"\\]*)*)"|'([^'\\]*(?:\\.[^'\\]*)*)'|([^ ]+))/g;
+    let match;
+    let found = false;
+    while ((match = kvRegex.exec(line)) !== null) {
+        found = true;
+        const key = match[1];
+        let value = match[3] !== undefined ? match[3] : (match[4] !== undefined ? match[4] : match[5]);
+        
+        if (match[3] !== undefined) {
+            value = value.replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+        } else if (match[4] !== undefined) {
+            value = value.replace(/\\'/g, "'").replace(/\\\\/g, '\\');
+        }
+        
+        kvPairs[key] = value;
+    }
+    return found ? kvPairs : undefined;
+}
+
+/**
+ * Joins continuation lines (lines without their own timestamp/prefix) to the previous line.
+ */
+export function joinContinuationLines(lines: NormalizedLine[]): NormalizedLine[] {
+    const joined: NormalizedLine[] = [];
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        if (i === 0) {
+            joined.push(line);
+            continue;
+        }
+
+        const prev = joined[joined.length - 1];
+        
+        if (!line.metadata?.prefix && line.normalizedText.trim() !== '') {
+            prev.normalizedText += '\n' + line.normalizedText;
+            prev.originalText += '\n' + line.originalText;
+            line.metadata = { ...line.metadata, isContinuation: true };
+        } else {
+            joined.push(line);
+        }
+    }
+    return joined;
 }
 
 /**

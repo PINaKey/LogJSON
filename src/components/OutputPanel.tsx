@@ -1,18 +1,20 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Copy, Download, Search } from 'lucide-react';
-import type { ExtractedJson, ApiDetail } from '../parsers/types';
+import { Copy, Download, Search, ShieldAlert, HelpCircle } from 'lucide-react';
+import type { ExtractedJson, ApiDetail, UserDetail } from '../parsers/types';
 import type { NormalizedLine } from '../parsers/log-normalizer';
 import { JsonCard } from './JsonCard';
 import { ApiCard } from './ApiCard';
+import { UserDetailCard } from './UserDetailCard';
 import { copyToClipboard } from '../utils/clipboard';
 import { downloadAsFile } from '../utils/download';
 
-export type OutputTab = 'json' | 'api' | 'raw';
+export type OutputTab = 'json' | 'api' | 'users' | 'raw';
 
 interface OutputPanelProps {
   jsons: ExtractedJson[];
   apis: ApiDetail[];
+  userDetails: UserDetail[];
   lines: NormalizedLine[];
   activeTab: OutputTab;
   setActiveTab: (tab: OutputTab) => void;
@@ -23,6 +25,7 @@ interface OutputPanelProps {
 export function OutputPanel({
   jsons,
   apis,
+  userDetails,
   lines,
   activeTab,
   setActiveTab,
@@ -30,6 +33,7 @@ export function OutputPanel({
   onLocateInput,
 }: OutputPanelProps) {
   const [filterQuery, setFilterQuery] = useState('');
+  const [showLowConfidence, setShowLowConfidence] = useState(false);
 
   const handleCopyAllJson = async () => {
     if (jsons.length === 0) return;
@@ -69,6 +73,10 @@ export function OutputPanel({
   });
 
   const filteredApis = apis.filter((api) => {
+    if (!showLowConfidence && api.confidence !== undefined && api.confidence < 0.4) {
+      return false;
+    }
+    
     if (!filterQuery) return true;
     const query = filterQuery.toLowerCase();
     
@@ -84,6 +92,16 @@ export function OutputPanel({
     } catch {
       // ignore
     }
+    return false;
+  });
+
+  const filteredUserDetails = userDetails.filter((detail) => {
+    if (!filterQuery) return true;
+    const query = filterQuery.toLowerCase();
+    if (detail.value.toLowerCase().includes(query)) return true;
+    if (detail.type.toLowerCase().includes(query)) return true;
+    if (detail.label?.toLowerCase().includes(query)) return true;
+    if (detail.jsonPath?.toLowerCase().includes(query)) return true;
     return false;
   });
 
@@ -124,6 +142,22 @@ export function OutputPanel({
           </button>
 
           <button
+            className={`tab-button ${activeTab === 'users' ? 'active' : ''}`}
+            onClick={() => setActiveTab('users')}
+          >
+            <span className="tab-dot" style={{ backgroundColor: 'var(--color-warning)' }} />
+            Users
+            {userDetails.length > 0 && <span className="tab-badge">{userDetails.length}</span>}
+            {activeTab === 'users' && (
+              <motion.div 
+                className="tab-active-indicator"
+                layoutId="activeTab"
+                transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+              />
+            )}
+          </button>
+
+          <button
             className={`tab-button ${activeTab === 'raw' ? 'active' : ''}`}
             onClick={() => setActiveTab('raw')}
           >
@@ -152,15 +186,51 @@ export function OutputPanel({
             </button>
           </div>
         )}
+
+        {apis.length > 0 && activeTab === 'api' && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <label style={{ fontSize: '0.8125rem', color: 'var(--color-text-dim)', display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+              <input 
+                type="checkbox" 
+                checked={showLowConfidence} 
+                onChange={(e) => setShowLowConfidence(e.target.checked)} 
+                style={{ accentColor: 'var(--color-primary)' }}
+              />
+              Show low confidence APIs
+            </label>
+            <div className="tooltip-container">
+              <HelpCircle size={14} style={{ color: 'var(--color-text-dim)', cursor: 'pointer' }} />
+              <div className="tooltip-text">
+                <strong>API Confidence Score:</strong><br />
+                • <strong>High (≥70%):</strong> Contains URL, Method, Status Code, and request/response bodies.<br />
+                • <strong>Medium (≥40%):</strong> Contains URL and at least Method or Status Code.<br />
+                • <strong>Low (&lt;40%):</strong> Contains partial query parameters or unassociated details.
+              </div>
+            </div>
+          </div>
+        )}
+
+        {userDetails.length > 0 && activeTab === 'users' && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div className="tooltip-container">
+              <HelpCircle size={14} style={{ color: 'var(--color-text-dim)', cursor: 'pointer' }} />
+              <div className="tooltip-text">
+                <strong>PII Confidence Score:</strong><br />
+                • <strong>High:</strong> Matches explicit JSON keys or highly structured regex formats (e.g. bearer tokens, emails, refined phone formats).<br />
+                • <strong>Medium:</strong> Matches general patterns on unstructured log lines.
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Search Bar for results */}
-      {(jsons.length > 0 || apis.length > 0) && activeTab !== 'raw' && (
+      {(jsons.length > 0 || apis.length > 0 || userDetails.length > 0) && activeTab !== 'raw' && (
         <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--color-border)', display: 'flex', alignItems: 'center', gap: 8, backgroundColor: 'rgba(0,0,0,0.02)' }}>
           <Search size={14} style={{ color: 'var(--color-text-dim)' }} />
           <input
             type="text"
-            placeholder={`Filter ${activeTab === 'json' ? 'JSON objects' : 'API requests'}...`}
+            placeholder={`Filter ${activeTab === 'json' ? 'JSON objects' : activeTab === 'api' ? 'API requests' : 'user details'}...`}
             value={filterQuery}
             onChange={(e) => setFilterQuery(e.target.value)}
             style={{
@@ -226,6 +296,39 @@ export function OutputPanel({
                   <ApiCard
                     key={api.id}
                     api={api}
+                    index={idx}
+                    addToast={addToast}
+                    onLocateInput={onLocateInput}
+                  />
+                ))
+              )}
+            </motion.div>
+          )}
+
+          {activeTab === 'users' && (
+            <motion.div
+              key="users-view"
+              initial={{ opacity: 0, x: 10 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -10 }}
+              transition={{ duration: 0.15 }}
+              className="result-card-list"
+            >
+              {/* PII Warning Banner */}
+              <div className="pii-warning-banner">
+                <ShieldAlert size={16} />
+                <span>Sensitive data detected. Be cautious when sharing screenshots or copying values — tokens and PII are displayed below.</span>
+              </div>
+
+              {filteredUserDetails.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '40px', color: 'var(--color-text-dim)' }}>
+                  {filterQuery ? 'No results match your search query.' : 'No user details or tokens found.'}
+                </div>
+              ) : (
+                filteredUserDetails.map((detail, idx) => (
+                  <UserDetailCard
+                    key={detail.id}
+                    detail={detail}
                     index={idx}
                     addToast={addToast}
                     onLocateInput={onLocateInput}

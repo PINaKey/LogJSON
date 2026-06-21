@@ -16,6 +16,8 @@ export function ApiCard({ api, index, addToast, onLocateInput }: ApiCardProps) {
   const [isReqOpen, setIsReqOpen] = useState(false);
   const [isResOpen, setIsResOpen] = useState(false);
   const [isHeadersOpen, setIsHeadersOpen] = useState(false);
+  const [isErrorOpen, setIsErrorOpen] = useState(true);
+  const [isQueryParamsOpen, setIsQueryParamsOpen] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
 
   const getStatusClass = (code?: number) => {
@@ -92,23 +94,35 @@ export function ApiCard({ api, index, addToast, onLocateInput }: ApiCardProps) {
     return <span className="api-url-wrapper font-mono"><span className="api-url-path">{url}</span></span>;
   };
 
+  const renderConfidenceBadge = (confidence: number) => {
+    if (confidence >= 0.7) {
+      return <span className="card-index-badge" style={{ backgroundColor: 'rgba(16, 185, 129, 0.15)', color: 'var(--color-success)', border: '1px solid rgba(16, 185, 129, 0.3)' }}>High</span>;
+    }
+    if (confidence >= 0.4) {
+      return <span className="card-index-badge" style={{ backgroundColor: 'rgba(245, 158, 11, 0.15)', color: 'var(--color-warning)', border: '1px solid rgba(245, 158, 11, 0.3)' }}>Med</span>;
+    }
+    return <span className="card-index-badge" style={{ backgroundColor: 'rgba(107, 114, 128, 0.15)', color: 'var(--color-text-dim)', border: '1px solid rgba(107, 114, 128, 0.3)' }}>Low</span>;
+  };
+
   return (
     <motion.div 
       className={`result-card api-card-container method-card-${methodLower}`}
+      style={{ opacity: api.confidence < 0.4 ? 0.7 : 1 }}
       initial={{ opacity: 0, y: 15 }}
-      animate={{ opacity: 1, y: 0 }}
+      animate={{ opacity: api.confidence < 0.4 ? 0.7 : 1, y: 0 }}
       transition={{ duration: 0.3, delay: Math.min(0.15, index * 0.03) }}
     >
       <div className="card-header">
         <div className="card-title-group" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
           <span className="card-index-badge">#{index + 1}</span>
+          {api.confidence !== undefined && renderConfidenceBadge(api.confidence)}
           <span 
             className={`api-method-badge ${methodLower}`}
             style={{ cursor: 'pointer' }}
             onClick={() => onLocateInput(api.sourceLines[0])}
-            title={`Jump to line ${api.sourceLines[0]} in source logs`}
+            title={api.rawContext || `Jump to line ${api.sourceLines[0]} in source logs`}
           >
-            {api.method}
+            {api.method || 'UNKNOWN'}
           </span>
           {renderHighlightedUrl(api.url)}
         </div>
@@ -124,6 +138,11 @@ export function ApiCard({ api, index, addToast, onLocateInput }: ApiCardProps) {
               ⏱️ {api.latency}
             </span>
           )}
+          {api.timestamp && (
+            <span className="api-latency-text" style={{ marginLeft: 8 }}>
+              🕒 {api.timestamp}
+            </span>
+          )}
           
           <div className="card-actions">
             <button onClick={handleCopyDetails} className="card-action-btn" title="Copy API Details">
@@ -135,6 +154,55 @@ export function ApiCard({ api, index, addToast, onLocateInput }: ApiCardProps) {
 
       <div className="card-body">
         <div className="api-subsections">
+          {/* Error Section */}
+          {!!api.error && (
+            <div className="api-subsection" style={{ borderLeftColor: 'var(--color-error)' }}>
+              <div 
+                className="api-subsection-header"
+                onClick={() => setIsErrorOpen(!isErrorOpen)}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span className="subsection-dot" style={{ backgroundColor: 'var(--color-error)' }} />
+                  <span style={{ color: 'var(--color-error)', fontWeight: 600 }}>Error Details</span>
+                </div>
+                {isErrorOpen ? <ChevronUp size={14} style={{ color: 'var(--color-error)' }} /> : <ChevronDown size={14} style={{ color: 'var(--color-error)' }} />}
+              </div>
+              {isErrorOpen && (
+                <div className="api-subsection-body">
+                  {api.error.code && <div style={{ marginBottom: 4, fontWeight: 'bold' }}>Code: {api.error.code}</div>}
+                  {api.error.message && <div style={{ marginBottom: 8 }}>{api.error.message}</div>}
+                  {api.error.stackTrace && (
+                    <pre style={{ fontSize: '0.75rem', overflowX: 'auto', backgroundColor: 'rgba(0,0,0,0.05)', padding: 8, borderRadius: 4, color: 'var(--color-error)' }}>
+                      {api.error.stackTrace}
+                    </pre>
+                  )}
+                  {!api.error.code && !api.error.message && !api.error.stackTrace && <JsonTree data={api.error} />}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Query Params Section */}
+          {!!api.queryParams && Object.keys(api.queryParams).length > 0 && (
+            <div className="api-subsection">
+              <div 
+                className="api-subsection-header"
+                onClick={() => setIsQueryParamsOpen(!isQueryParamsOpen)}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span className="subsection-dot" style={{ backgroundColor: 'var(--color-warning)' }} />
+                  <span>Query Params ({Object.keys(api.queryParams).length})</span>
+                </div>
+                {isQueryParamsOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+              </div>
+              {isQueryParamsOpen && (
+                <div className="api-subsection-body">
+                  <JsonTree data={api.queryParams} />
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Headers Section */}
           {!!api.headers && (
             <div className="api-subsection">

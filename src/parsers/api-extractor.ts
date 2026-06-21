@@ -1,54 +1,396 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable no-useless-escape */
-import { type ApiDetail, type ExtractedJson } from './types';
+import { type ApiDetail, type ExtractedJson, type ApiFieldHit } from './types';
 
 function generateId(): string {
     return `api_${Math.random().toString(36).substring(2, 11)}`;
 }
 
-// Regex to detect HTTP Method and URL/Path
 const METHOD_URL_REGEX =
-    /\b(GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD)\b\s+["']?(https?:\/\/[^\s"']+|(?:(?:\/[a-zA-Z0-9_\-\.\~%]+)+)\/?(?:\?[^\s"']*)?)["']?/i;
+    /\b(GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD)\b\s+["']?(https?:\/\/[^\s"']+|(?:(?:\/[a-zA-Z0-9_\-\.\\~%]+)+)\/?(?:\?[^\s"']*)?)['"']?/i;
 
-// Regex to detect HTTP Status Codes
 const STATUS_CODE_REGEXES = [
-    /\bstatus(?:_?code)?[:= ]*([1-5]\d{2})\b/i, // status: 200, statusCode=404, status_code: 500
-    /\bHTTP\/1\.[012]"\s+([1-5]\d{2})\b/i, // "POST /api HTTP/1.1" 200
-    /\b(?:sent|returned)\s+([1-5]\d{2})\b/i, // returned 200
-    /\b([1-5]\d{2})\s+OK\b/i, // 200 OK
+    /\bstatus(?:_?code)?[:= ]*([1-5]\d{2})\b/i,
+    /\bHTTP\/1\.[012]"\s+([1-5]\d{2})\b/i,
+    /\b(?:sent|returned)\s+([1-5]\d{2})\b/i,
+    /\b([1-5]\d{2})\s+OK\b/i,
     /\bstatus\s+([1-5]\d{2})\b/i,
 ];
 
-// Regex to detect Latency / Duration
 const LATENCY_REGEXES = [
     /\btook\s*[:=]?\s*(\d+(?:\.\d+)?\s*(?:ms|s|milliseconds))\b/i,
     /\bduration\s*[:=]?\s*(\d+(?:\.\d+)?\s*(?:ms|s))\b/i,
     /\blatency\s*[:=]?\s*(\d+(?:\.\d+)?\s*(?:ms|s))\b/i,
-    /\b(\d+(?:\.\d+)?\s*ms)\b/i, // e.g. "45ms"
-    /\b(\d+\.\d+\s*s)\b/i, // e.g. "1.24s"
+    /\b(\d+(?:\.\d+)?\s*ms)\b/i,
+    /\b(\d+\.\d+\s*s)\b/i,
 ];
 
-/**
- * Extracts API details from text and correlates them with extracted JSONs.
- */
-export function extractApiDetails(
-    text: string,
+function tryParseJsonString(str: unknown): unknown | null {
+    if (typeof str !== 'string') return null;
+    const trimmed = str.trim();
+    if (
+        (trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+        (trimmed.startsWith('[') && trimmed.endsWith(']'))
+    ) {
+        try {
+            return JSON.parse(trimmed);
+        } catch {
+            try {
+                return JSON.parse(trimmed.replace(/\\\//g, '/'));
+            } catch {
+                return null;
+            }
+        }
+    }
+    return null;
+}
+
+// ---------------------------------------------------------
+// NEW KEYWORD SCANNER AND CLUSTERING
+// ---------------------------------------------------------
+
+const KEYWORD_MAP: Record<string, string[]> = {
+    method: [
+        'method',
+        'httpmethod',
+        'http_method',
+        'requestmethod',
+        'request_method',
+    ],
+    url: [
+        'url',
+        'uri',
+        'endpoint',
+        'path',
+        'href',
+        'requesturl',
+        'request_url',
+        'requesturi',
+        'request_uri',
+        'resource',
+    ],
+    status: [
+        'status',
+        'statuscode',
+        'status_code',
+        'httpstatus',
+        'http_status',
+        'responsecode',
+        'response_code',
+    ],
+    requestBody: [
+        'body',
+        'requestbody',
+        'request_body',
+        'payload',
+        'requestpayload',
+        'request_payload',
+        'params',
+        'input',
+    ],
+    responseBody: [
+        'responsebody',
+        'response_body',
+        'responsepayload',
+        'response_payload',
+        'result',
+        'output',
+    ],
+    headers: [
+        'headers',
+        'requestheaders',
+        'request_headers',
+        'responseheaders',
+        'response_headers',
+    ],
+    latency: [
+        'duration',
+        'durationms',
+        'duration_ms',
+        'latency',
+        'responsetime',
+        'response_time',
+        'elapsed',
+        'took',
+        'time',
+        'elapsedms',
+        'elapsed_ms',
+    ],
+    error: [
+        'error',
+        'errormessage',
+        'error_message',
+        'exception',
+        'fault',
+        'errorcode',
+        'error_code',
+        'stacktrace',
+        'stack_trace',
+        'stack',
+    ],
+    timestamp: [
+        'timestamp',
+        'datetime',
+        'date',
+        'createdat',
+        'created_at',
+        'requesttime',
+        'request_time',
+    ],
+    queryParams: [
+        'queryparams',
+        'query_params',
+        'querystring',
+        'query_string',
+        'searchparams',
+        'search_params',
+        'qs',
+    ],
+};
+
+function getCategoryForKeyword(key: string): string | null {
+    const lower = key.toLowerCase();
+    for (const [category, keywords] of Object.entries(KEYWORD_MAP)) {
+        if (keywords.includes(lower)) {
+            return category;
+        }
+    }
+    if (lower === 'data') return 'data'; // special case
+    return null;
+}
+
+function scanForApiFields(
+    obj: unknown,
+    path: string[],
+    depth: number,
+    hits: ApiFieldHit[],
+    visited: WeakSet<any>,
+): void {
+    if (depth > 15) return;
+    if (obj === null || typeof obj !== 'object') return;
+
+    if (visited.has(obj)) return;
+    visited.add(obj);
+
+    if (Array.isArray(obj)) {
+        for (let i = 0; i < obj.length; i++) {
+            scanForApiFields(
+                obj[i],
+                [...path, String(i)],
+                depth + 1,
+                hits,
+                visited,
+            );
+        }
+    } else {
+        const record = obj as Record<string, unknown>;
+        for (const [key, val] of Object.entries(record)) {
+            const category = getCategoryForKeyword(key);
+            if (category) {
+                hits.push({
+                    keyword: category,
+                    value: val,
+                    path: [...path, key],
+                    depth,
+                });
+            }
+            if (val !== null && typeof val === 'object') {
+                const lowerKey = key.toLowerCase();
+                const isWrapper = [
+                    'req',
+                    'request',
+                    'res',
+                    'response',
+                    'error',
+                    'headers',
+                    'data',
+                    'payload',
+                    'body',
+                    'metadata',
+                    'meta',
+                    'details',
+                ].includes(lowerKey);
+                scanForApiFields(
+                    val,
+                    isWrapper ? path : [...path, key],
+                    depth + 1,
+                    hits,
+                    visited,
+                );
+            }
+        }
+    }
+}
+
+function clusterApiFields(hits: ApiFieldHit[]): ApiFieldHit[][] {
+    const clusters: Record<string, ApiFieldHit[]> = {};
+
+    for (const hit of hits) {
+        const path = hit.path.slice(0, -1);
+        while (path.length > 0) {
+            const last = path[path.length - 1].toLowerCase();
+            if (
+                [
+                    'req',
+                    'request',
+                    'res',
+                    'response',
+                    'error',
+                    'headers',
+                    'data',
+                    'payload',
+                    'body',
+                    'metadata',
+                    'meta',
+                    'details',
+                ].includes(last)
+            ) {
+                path.pop();
+            } else {
+                break;
+            }
+        }
+        const parentPath = path.join('.');
+        if (!clusters[parentPath]) {
+            clusters[parentPath] = [];
+        }
+        clusters[parentPath].push(hit);
+    }
+
+    return Object.values(clusters);
+}
+
+function buildApiDetail(
+    cluster: ApiFieldHit[],
+    sourceLines: number[],
+): ApiDetail | null {
+    const api: Partial<ApiDetail> = {
+        id: generateId(),
+        sourceLines,
+        confidence: 0,
+    };
+
+    let confidence = 0;
+    let urlFound = false;
+    let statusFound = false;
+
+    for (const hit of cluster) {
+        const cat = hit.keyword;
+        const val = hit.value;
+
+        if (cat === 'url' && typeof val === 'string' && !api.url) {
+            api.url = val;
+            confidence += 0.4;
+            urlFound = true;
+        } else if (cat === 'method' && typeof val === 'string' && !api.method) {
+            api.method = val.toUpperCase();
+            confidence += 0.2;
+        } else if (cat === 'status' && !api.statusCode) {
+            let code: number | undefined;
+            if (typeof val === 'number') code = val;
+            else if (typeof val === 'string') {
+                const parsed = parseInt(val, 10);
+                if (!isNaN(parsed) && parsed >= 100 && parsed < 600)
+                    code = parsed;
+            }
+            if (code) {
+                api.statusCode = code;
+                confidence += 0.2;
+                statusFound = true;
+            }
+        } else if (cat === 'requestBody' && !api.requestBody) {
+            api.requestBody = tryParseJsonString(val) || val;
+            confidence += 0.1;
+        } else if (cat === 'responseBody' && !api.responseBody) {
+            api.responseBody = tryParseJsonString(val) || val;
+            confidence += 0.1;
+        } else if (
+            cat === 'headers' &&
+            val &&
+            typeof val === 'object' &&
+            !api.headers
+        ) {
+            api.headers = val as Record<string, string>;
+            confidence += 0.05;
+        } else if (cat === 'latency' && !api.latency) {
+            if (typeof val === 'number') api.latency = `${val}ms`;
+            else if (typeof val === 'string') api.latency = val;
+        } else if (cat === 'error') {
+            api.error = api.error || {};
+            if (typeof val === 'string') {
+                if (
+                    hit.path[hit.path.length - 1]
+                        .toLowerCase()
+                        .includes('stack')
+                ) {
+                    api.error.stackTrace = val;
+                } else if (
+                    hit.path[hit.path.length - 1].toLowerCase().includes('code')
+                ) {
+                    api.error.code = val;
+                } else {
+                    api.error.message = val;
+                }
+            } else if (val && typeof val === 'object') {
+                const errObj = val as Record<string, unknown>;
+                api.error.message = (errObj['message'] ||
+                    errObj['errorMessage']) as string;
+                api.error.code = (errObj['code'] ||
+                    errObj['errorCode']) as string;
+                api.error.stackTrace = (errObj['stackTrace'] ||
+                    errObj['stack']) as string;
+            }
+            confidence += 0.05;
+        } else if (
+            cat === 'timestamp' &&
+            typeof val === 'string' &&
+            !api.timestamp
+        ) {
+            api.timestamp = val;
+        } else if (
+            cat === 'queryParams' &&
+            val &&
+            typeof val === 'object' &&
+            !api.queryParams
+        ) {
+            api.queryParams = val as Record<string, string>;
+        } else if (cat === 'data') {
+            if (statusFound && !api.responseBody) {
+                api.responseBody = tryParseJsonString(val) || val;
+            } else if (urlFound && !api.requestBody) {
+                api.requestBody = tryParseJsonString(val) || val;
+            }
+        }
+    }
+
+    api.confidence = confidence;
+
+    if (confidence >= 0.3) {
+        return api as ApiDetail;
+    }
+    return null;
+}
+
+// ---------------------------------------------------------
+// EXTRACTOR
+// ---------------------------------------------------------
+
+function extractRegexApis(
+    lines: string[],
     extractedJsons: ExtractedJson[],
 ): ApiDetail[] {
-    const lines = text.split(/\r?\n/);
     const apis: ApiDetail[] = [];
 
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
-        const lineNum = i + 1; // 1-indexed
+        const lineNum = i + 1;
 
-        // 1. Detect Method and URL
         const methodUrlMatch = line.match(METHOD_URL_REGEX);
         if (!methodUrlMatch) continue;
 
         const method = methodUrlMatch[1].toUpperCase();
         const url = methodUrlMatch[2];
 
-        // 2. Detect Status Code
         let statusCode: number | undefined;
         for (const regex of STATUS_CODE_REGEXES) {
             const match = line.match(regex);
@@ -58,7 +400,6 @@ export function extractApiDetails(
             }
         }
 
-        // 3. Detect Latency
         let latency: string | undefined;
         for (const regex of LATENCY_REGEXES) {
             const match = line.match(regex);
@@ -68,8 +409,6 @@ export function extractApiDetails(
             }
         }
 
-        // 4. Find correlated JSONs
-        // Heuristic: Search for JSONs starting on this line or up to 5 lines below
         const nearbyJsons = extractedJsons.filter((json) => {
             const startLine = json.location.startLine;
             return startLine >= lineNum && startLine <= lineNum + 5;
@@ -77,21 +416,13 @@ export function extractApiDetails(
 
         let requestBody: unknown | undefined;
         let responseBody: unknown | undefined;
-
-        // Check headers in nearby JSONs
         let headers: Record<string, string> | undefined;
 
         if (nearbyJsons.length > 0) {
-            // Helper to get text from API line to the start of the JSON
             const getIntermediateText = (jsonStartLine: number) => {
-                // lines is 0-indexed, so API line is index i (lineNum - 1).
-                // jsonStartLine is 1-indexed, so we slice up to jsonStartLine (exclusive, since slice is exclusive).
-                // This will include lines from the API line to the line containing the JSON start.
                 return lines.slice(i, jsonStartLine).join('\n');
             };
 
-            // If there are multiple JSONs nearby
-            // Let's see if any JSON is labeled or contains request/response indicators
             const requestJson = nearbyJsons.find((json) => {
                 const ctx = getIntermediateText(json.location.startLine);
                 return (
@@ -104,14 +435,9 @@ export function extractApiDetails(
                 return /response|res|result|output/i.test(ctx);
             });
 
-            if (requestJson) {
-                requestBody = requestJson.parsed;
-            }
-            if (responseJson) {
-                responseBody = responseJson.parsed;
-            }
+            if (requestJson) requestBody = requestJson.parsed;
+            if (responseJson) responseBody = responseJson.parsed;
 
-            // If we couldn't differentiate by context but have JSONs, make a guess:
             if (!requestBody && !responseBody) {
                 if (nearbyJsons.length === 1) {
                     const singleJson = nearbyJsons[0];
@@ -129,11 +455,9 @@ export function extractApiDetails(
                     if (isGetOrDelete || hasResponseKeys) {
                         responseBody = singleJson.parsed;
                     } else {
-                        if (['POST', 'PUT', 'PATCH'].includes(method)) {
+                        if (['POST', 'PUT', 'PATCH'].includes(method))
                             requestBody = singleJson.parsed;
-                        } else {
-                            responseBody = singleJson.parsed;
-                        }
+                        else responseBody = singleJson.parsed;
                     }
                 } else if (nearbyJsons.length >= 2) {
                     requestBody = nearbyJsons[0].parsed;
@@ -141,7 +465,6 @@ export function extractApiDetails(
                 }
             }
 
-            // Extract headers if they look like a header block
             const headerJson = nearbyJsons.find((json) => {
                 const ctx = getIntermediateText(json.location.startLine);
                 return (
@@ -162,6 +485,12 @@ export function extractApiDetails(
             }
         }
 
+        let confidence = 0.4;
+        if (method) confidence += 0.2;
+        if (statusCode) confidence += 0.2;
+        if (requestBody) confidence += 0.1;
+        if (responseBody) confidence += 0.1;
+
         apis.push({
             id: generateId(),
             method,
@@ -171,12 +500,119 @@ export function extractApiDetails(
             requestBody,
             responseBody,
             latency,
+            rawContext: line,
+            confidence,
             sourceLines: [
                 lineNum,
                 ...nearbyJsons.map((j) => j.location.startLine),
             ],
         });
     }
-
     return apis;
+}
+
+function mergeApiDetails(
+    regexApis: ApiDetail[],
+    structuredApis: ApiDetail[],
+): ApiDetail[] {
+    const merged: ApiDetail[] = [];
+    const usedStructured = new Set<string>();
+
+    for (const regexApi of regexApis) {
+        let bestMatch: ApiDetail | null = null;
+
+        for (const sApi of structuredApis) {
+            if (usedStructured.has(sApi.id)) continue;
+
+            if (
+                regexApi.url === sApi.url &&
+                (regexApi.method === sApi.method || !sApi.method)
+            ) {
+                bestMatch = sApi;
+                break;
+            }
+
+            if (
+                regexApi.url &&
+                sApi.url &&
+                regexApi.url.split('?')[0] === sApi.url.split('?')[0]
+            ) {
+                bestMatch = sApi;
+                break;
+            }
+        }
+
+        if (bestMatch) {
+            usedStructured.add(bestMatch.id);
+            merged.push({
+                ...regexApi,
+                ...bestMatch,
+                id: regexApi.id,
+                method: bestMatch.method || regexApi.method,
+                statusCode: bestMatch.statusCode || regexApi.statusCode,
+                latency: bestMatch.latency || regexApi.latency,
+                requestBody: bestMatch.requestBody || regexApi.requestBody,
+                responseBody: bestMatch.responseBody || regexApi.responseBody,
+                headers: bestMatch.headers || regexApi.headers,
+                sourceLines: [
+                    ...new Set([
+                        ...regexApi.sourceLines,
+                        ...bestMatch.sourceLines,
+                    ]),
+                ].sort((a, b) => a - b),
+                confidence: Math.max(regexApi.confidence, bestMatch.confidence),
+            });
+        } else {
+            merged.push(regexApi);
+        }
+    }
+
+    for (const sApi of structuredApis) {
+        if (!usedStructured.has(sApi.id)) {
+            merged.push(sApi);
+        }
+    }
+
+    return merged;
+}
+
+export function extractApiDetails(
+    text: string,
+    extractedJsons: ExtractedJson[],
+): ApiDetail[] {
+    const lines = text.split(/\r?\n/);
+
+    const regexApis = extractRegexApis(lines, extractedJsons);
+
+    const structuredApis: ApiDetail[] = [];
+    const topLevelJsons = extractedJsons.filter((j) => !j.isNested);
+
+    for (const json of topLevelJsons) {
+        const hits: ApiFieldHit[] = [];
+        scanForApiFields(json.parsed, [], 0, hits, new WeakSet());
+
+        const clusters = clusterApiFields(hits);
+
+        for (const cluster of clusters) {
+            const api = buildApiDetail(cluster, [json.location.startLine]);
+            if (api) {
+                if (
+                    !api.latency &&
+                    typeof json.parsed === 'object' &&
+                    json.parsed !== null
+                ) {
+                    const root = json.parsed as Record<string, unknown>;
+                    if (typeof root['durationMs'] === 'number')
+                        api.latency = `${root['durationMs']}ms`;
+                    else if (typeof root['duration'] === 'number')
+                        api.latency = `${root['duration']}ms`;
+                }
+                structuredApis.push(api);
+            }
+        }
+    }
+
+    return mergeApiDetails(regexApis, structuredApis).sort(
+        (a, b) => a.sourceLines[0] - b.sourceLines[0],
+    );
 }

@@ -36,6 +36,7 @@ export default function App() {
     normalizedLines,
     extractedJsons,
     apis,
+    userDetails,
     isParsing,
     parseTime,
     handleParse,
@@ -117,7 +118,8 @@ export default function App() {
   const switchTabIdx = (idx: number) => {
     if (idx === 0) setActiveTab('json');
     else if (idx === 1) setActiveTab('api');
-    else if (idx === 2) setActiveTab('raw');
+    else if (idx === 2) setActiveTab('users');
+    else if (idx === 3) setActiveTab('raw');
   };
 
   useKeyboardShortcuts({
@@ -129,7 +131,7 @@ export default function App() {
     onSwitchTab: switchTabIdx,
   });
 
-  const hasResults = extractedJsons.length > 0 || apis.length > 0;
+  const hasResults = extractedJsons.length > 0 || apis.length > 0 || userDetails.length > 0;
 
   return (
     <div className="app-container">
@@ -170,6 +172,7 @@ export default function App() {
             <OutputPanel
               jsons={extractedJsons}
               apis={apis}
+              userDetails={userDetails}
               lines={normalizedLines}
               activeTab={activeTab}
               setActiveTab={setActiveTab}
@@ -197,6 +200,7 @@ export default function App() {
       <StatusBar 
         jsonsCount={extractedJsons.length}
         apisCount={apis.length}
+        usersCount={userDetails.length}
         parseTime={parseTime}
         isParsing={isParsing}
       />

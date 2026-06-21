@@ -4,11 +4,12 @@ import { motion } from 'framer-motion';
 interface StatusBarProps {
   jsonsCount: number;
   apisCount: number;
+  usersCount: number;
   parseTime: number;
   isParsing: boolean;
 }
 
-export function StatusBar({ jsonsCount, apisCount, parseTime, isParsing }: StatusBarProps) {
+export function StatusBar({ jsonsCount, apisCount, usersCount, parseTime, isParsing }: StatusBarProps) {
   const [displayTime, setDisplayTime] = useState(0);
 
   useEffect(() => {
@@ -53,7 +54,7 @@ export function StatusBar({ jsonsCount, apisCount, parseTime, isParsing }: Statu
           </div>
         )}
 
-        {!isParsing && (jsonsCount > 0 || apisCount > 0) && (
+        {!isParsing && (jsonsCount > 0 || apisCount > 0 || usersCount > 0) && (
           <>
             <div className="status-stat-item">
               <span>JSONs: <b>{jsonsCount}</b></span>
@@ -61,6 +62,11 @@ export function StatusBar({ jsonsCount, apisCount, parseTime, isParsing }: Statu
             <div className="status-stat-item">
               <span>APIs: <b>{apisCount}</b></span>
             </div>
+            {usersCount > 0 && (
+              <div className="status-stat-item">
+                <span>Users: <b>{usersCount}</b></span>
+              </div>
+            )}
           </>
         )}
       </div>

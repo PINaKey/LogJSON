@@ -7,7 +7,11 @@ LogJSON is a stateless, client-side web application designed to help developers 
 ## ✨ Features
 
 - **Robust Bracket-Matching Parser**: character-by-character scanner with double-backslash tracking that extracts nested JSON, double-escaped strings, and JavaScript-like single-quoted blocks.
-- **Context-Aware API Correlation**: Detects request method, URL, status code, latency, and maps adjacent JSON blocks as request/response payloads.
+- **Deep Keyword-Based API Correlation**: Upgraded parser engine that walks JSON objects recursively to extract deeply nested method, url, status, request/response body, latency, query parameters, and error details (code, message, stack traces).
+- **API Confidence Scoring System**: Automatically scores and badges matched endpoints (**High / Medium / Low**) based on matched properties. Offers a toolbar toggle filter in the UI to hide noisy, low-confidence entries, and an interactive tooltip explaining the scoring.
+- **PII & User Details Extractor (New Tab)**: Scans logs and JSON structures for sensitive attributes including Bearer Tokens, API Keys, Emails, Phone Numbers (refined to US, Indian, and standalone 10-digit formats), User IDs, Usernames, Session IDs, and Client IP addresses. Surfaced behind a dedicated PII warning banner with high/medium confidence scores.
+- **Always-On JWT.io Inspector**: Generates direct links for all bearer tokens (with stripped quotes and cleaned spacing) to inspect them instantly on the JWT.io debugger.
+- **JWT Claims Tree**: Automatically base64-decodes JWT payloads (supporting both signed and unsigned structures) and renders them in an interactive collapsible tree viewer.
 - **Background Web Worker Thread**: Offloads logs exceeding 10,000 lines to a worker thread to keep the main thread fully responsive.
 - **Premium Dark Mode & Glassmorphic UI**: High-contrast, custom scrollbars, glowing active states, and auto-collapsed JSON tree structures (beyond depth 3).
 - **Smooth Animations**: spring physics transitions, staggered card listings, and responsive layouts powered by Framer Motion.
@@ -38,12 +42,13 @@ LogJSON/
 │   ├── styles/
 │   │   ├── index.css        # Reset, fonts, and scrollbars
 │   │   ├── themes.css       # Light/Dark tokens
-│   │   └── components.css   # Layout, cards, tree, modals
+│   │   └── components.css   # Layout, cards, tree, modals, tooltips
 │   ├── parsers/             # Core Engine (Pure TS, No React Imports)
 │   │   ├── types.ts         # Parsed interfaces
 │   │   ├── log-normalizer.ts# Strip prefixes & unescape
 │   │   ├── json-extractor.ts# Bracket-matching scanner
-│   │   └── api-extractor.ts # HTTP endpoints & payloads mapper
+│   │   ├── api-extractor.ts # HTTP endpoints & payloads mapper
+│   │   └── user-extractor.ts# PII, credentials, & JWT decoder (New)
 │   ├── components/          # React Components
 │   │   ├── LogoBanner.tsx   # Header & actions bar
 │   │   ├── InputPanel.tsx   # Input, files drag/drop, stats
@@ -51,6 +56,7 @@ LogJSON/
 │   │   ├── JsonTree.tsx     # Custom collapsible tree viewer
 │   │   ├── JsonCard.tsx     # Extracted JSON card
 │   │   ├── ApiCard.tsx      # Correlated HTTP request card
+│   │   ├── UserDetailCard.tsx# Surfaced PII / credential card (New)
 │   │   ├── StatusBar.tsx    # Parsed counts & timers
 │   │   ├── EmptyState.tsx   # Quick actions onboarding view
 │   │   └── Toast.tsx        # Toast notifications
@@ -77,7 +83,7 @@ LogJSON/
 | `Cmd/Ctrl + D` | Download all parsed results as a `.json` file |
 | `Cmd/Ctrl + L` | Clear logs input and reset results state |
 | `Cmd/Ctrl + K` | Toggle Light/Dark Mode |
-| `1` / `2` / `3` | Switch output tabs: JSON / APIs / Raw |
+| `1` / `2` / `3` / `4` | Switch output tabs: JSON / APIs / Users / Normalized |
 
 ---
 
@@ -100,7 +106,7 @@ npm install
 ```
 
 ### 3. Start Development Server
-Run Vite's fast HMR local dev server:
+Run Vite's local dev server:
 ```bash
 npm run dev
 ```
@@ -113,11 +119,11 @@ npx vitest run
 ```
 
 ### 5. Build for Production
-Bundle and optimize compile assets for hosting:
+Bundle and optimize assets for hosting:
 ```bash
 npm run build
 ```
-Preview the built build folder locally:
+Preview the built folder locally:
 ```bash
 npm run preview
 ```

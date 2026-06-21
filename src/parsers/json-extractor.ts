@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { type ExtractedJson } from './types';
 import { unescapeJsonString } from './log-normalizer';
 
@@ -18,30 +19,36 @@ function stripWrappingQuotesFromNestedJson(str: string): string {
     let result = str;
     const startIdx = result.indexOf('"{');
     const endIdx = result.lastIndexOf('}"');
-    
+
     if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
         const jsonCandidate = result.substring(startIdx + 1, endIdx + 1);
         try {
             JSON.parse(jsonCandidate);
-            result = result.substring(0, startIdx) + jsonCandidate + result.substring(endIdx + 2);
+            result =
+                result.substring(0, startIdx) +
+                jsonCandidate +
+                result.substring(endIdx + 2);
         } catch {
             // ignore
         }
     }
-    
+
     const startArrIdx = result.indexOf('"[');
     const endArrIdx = result.lastIndexOf(']"');
-    
+
     if (startArrIdx !== -1 && endArrIdx !== -1 && endArrIdx > startArrIdx) {
         const jsonCandidate = result.substring(startArrIdx + 1, endArrIdx + 1);
         try {
             JSON.parse(jsonCandidate);
-            result = result.substring(0, startArrIdx) + jsonCandidate + result.substring(endArrIdx + 2);
+            result =
+                result.substring(0, startArrIdx) +
+                jsonCandidate +
+                result.substring(endArrIdx + 2);
         } catch {
             // ignore
         }
     }
-    
+
     return result;
 }
 
@@ -66,14 +73,17 @@ function cleanParsedValue(val: any): any {
     }
     if (typeof val === 'string') {
         let str = val.trim();
-        
+
         // 1. Remove wrapping quotes if the string is fully wrapped and has escaped content
         if (str.startsWith('"') && str.endsWith('"') && str.includes('\\"')) {
             str = str.slice(1, -1);
         }
 
         // 2. If the string is a valid JSON array or object, parse it recursively
-        if ((str.startsWith('{') && str.endsWith('}')) || (str.startsWith('[') && str.endsWith(']'))) {
+        if (
+            (str.startsWith('{') && str.endsWith('}')) ||
+            (str.startsWith('[') && str.endsWith(']'))
+        ) {
             try {
                 const parsed = JSON.parse(str);
                 if (parsed !== null && typeof parsed === 'object') {
@@ -91,7 +101,7 @@ function cleanParsedValue(val: any): any {
                 }
             }
         }
-        
+
         // 3. If it contains escaped quotes, unescape them and strip wrapping quotes from inner JSON
         if (val.includes('\\"')) {
             const unescaped = unescapeJsonString(val);
@@ -149,22 +159,22 @@ function tryParseJson(
     return null;
 }
 
-/**
- * Scans text and extracts JSON objects and arrays using bracket matching.
- */
-export function extractJsonFromText(text: string): ExtractedJson[] {
+export function extractJsonFromText(
+    text: string,
+    joinedText?: string,
+): ExtractedJson[] {
     const results: ExtractedJson[] = [];
-    const len = text.length;
+    const textToScan = joinedText || text;
+    const len = textToScan.length;
 
-    const lineOffsets: number[] = [0]; // offset of start of each line
+    const lineOffsets: number[] = [0];
 
     for (let i = 0; i < len; i++) {
-        if (text[i] === '\n') {
+        if (textToScan[i] === '\n') {
             lineOffsets.push(i + 1);
         }
     }
 
-    // Helper to get line and column for a index
     function getLineCol(index: number): { line: number; col: number } {
         let low = 0;
         let high = lineOffsets.length - 1;
@@ -186,40 +196,37 @@ export function extractJsonFromText(text: string): ExtractedJson[] {
         };
     }
 
-    // Helper to get the context line for a starting index
     function getContextLine(index: number): string {
         const { line: lineNum } = getLineCol(index);
         const startOffset = lineOffsets[lineNum - 1] || 0;
         const nextLineOffset = lineOffsets[lineNum];
         const endOffset =
-            nextLineOffset !== undefined ? nextLineOffset - 1 : text.length;
+            nextLineOffset !== undefined
+                ? nextLineOffset - 1
+                : textToScan.length;
 
-        // Extract the line, truncate if extremely long
-        let lineStr = text.substring(startOffset, endOffset).trim();
+        let lineStr = textToScan.substring(startOffset, endOffset).trim();
         if (lineStr.length > 150) {
             lineStr = lineStr.substring(0, 150) + '...';
         }
         return lineStr;
     }
 
-    // Scan character by character
     for (let i = 0; i < len; i++) {
-        const char = text[i];
+        const char = textToScan[i];
 
         if (char === '{' || char === '[') {
             const startPos = i;
-            const startChar = char;
-            const closeChar = startChar === '{' ? '}' : ']';
-
             let depth = 0;
             let inString = false;
             let stringChar = '';
             let foundMatch = false;
             let endPos = -1;
             let backslashCount = 0;
+            const stack: string[] = [];
 
             for (let j = startPos; j < len; j++) {
-                const c = text[j];
+                const c = textToScan[j];
 
                 if (c === '\\') {
                     backslashCount++;
@@ -241,10 +248,12 @@ export function extractJsonFromText(text: string): ExtractedJson[] {
                         }
                     }
                 } else if (!inString) {
-                    if (c === startChar) {
+                    if (c === '{' || c === '[') {
                         depth++;
-                    } else if (c === closeChar) {
+                        stack.push(c);
+                    } else if (c === '}' || c === ']') {
                         depth--;
+                        stack.pop();
                         if (depth === 0) {
                             endPos = j;
                             foundMatch = true;
@@ -253,43 +262,62 @@ export function extractJsonFromText(text: string): ExtractedJson[] {
                     }
                 }
 
-                backslashCount = 0; // reset for non-backslash
+                backslashCount = 0;
             }
 
+            let rawContent = '';
+            let parsedResult: { parsed: unknown; isEscaped: boolean } | null =
+                null;
+            let isIncomplete = false;
+
             if (foundMatch && endPos !== -1) {
-                const rawContent = text.substring(startPos, endPos + 1);
-                const parsedResult = tryParseJson(rawContent);
-
-                if (parsedResult) {
-                    const { line: startLine, col: startCol } =
-                        getLineCol(startPos);
-                    const { line: endLine, col: endCol } = getLineCol(endPos);
-                    const context = getContextLine(startPos);
-
-                    const extracted: ExtractedJson = {
-                        id: generateId(),
-                        raw: rawContent,
-                        parsed: parsedResult.parsed,
-                        location: {
-                            startLine,
-                            endLine,
-                            startCol,
-                            endCol,
-                        },
-                        isNested: false,
-                        isEscaped: parsedResult.isEscaped,
-                        isIncomplete: false,
-                        context,
-                    };
-
-                    results.push(extracted);
+                rawContent = textToScan.substring(startPos, endPos + 1);
+                parsedResult = tryParseJson(rawContent);
+            } else if (depth > 0 && depth <= 20) {
+                // Truncated JSON recovery
+                const recovered = textToScan.substring(startPos);
+                if (recovered.length < 50000) {
+                    let toAppend = '';
+                    if (inString) toAppend += stringChar;
+                    for (let k = stack.length - 1; k >= 0; k--) {
+                        toAppend += stack[k] === '{' ? '}' : ']';
+                    }
+                    parsedResult = tryParseJson(recovered + toAppend);
+                    if (parsedResult) {
+                        rawContent = recovered;
+                        isIncomplete = true;
+                        endPos = len - 1;
+                        i = endPos; // Skip the rest to avoid duplicate extraction
+                    }
                 }
+            }
+
+            if (parsedResult) {
+                const { line: startLine, col: startCol } = getLineCol(startPos);
+                const { line: endLine, col: endCol } = getLineCol(endPos);
+                const context = getContextLine(startPos);
+
+                const extracted: ExtractedJson = {
+                    id: generateId(),
+                    raw: rawContent,
+                    parsed: parsedResult.parsed,
+                    location: {
+                        startLine,
+                        endLine,
+                        startCol,
+                        endCol,
+                    },
+                    isNested: false,
+                    isEscaped: parsedResult.isEscaped,
+                    isIncomplete,
+                    context,
+                };
+
+                results.push(extracted);
             }
         }
     }
 
-    // Post-process to flag nested JSONs
-    // A JSON block is nested if its start/end coordinates are inside another JSON block
     for (let i = 0; i < results.length; i++) {
         const candidate = results[i];
         for (let j = 0; j < results.length; j++) {
@@ -315,7 +343,6 @@ export function extractJsonFromText(text: string): ExtractedJson[] {
         }
     }
 
-    // Sort by start line and start col
     return results.sort((a, b) => {
         if (a.location.startLine !== b.location.startLine) {
             return a.location.startLine - b.location.startLine;

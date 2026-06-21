@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
-import { normalizeLogs } from '../parsers/log-normalizer';
+import { normalizeLogs, joinContinuationLines } from '../parsers/log-normalizer';
 import type { NormalizedLine } from '../parsers/log-normalizer';
-import type { ExtractedJson, ApiDetail } from '../parsers/types';
+import type { ExtractedJson, ApiDetail, UserDetail } from '../parsers/types';
 import { extractJsonFromText } from '../parsers/json-extractor';
 import { extractApiDetails } from '../parsers/api-extractor';
+import { extractUserDetails } from '../parsers/user-extractor';
 
 export interface ParseResult {
   normalizedLines: NormalizedLine[];
@@ -17,6 +18,7 @@ export function useParser(addToast: (msg: string, type: 'success' | 'warning' | 
   const [normalizedLines, setNormalizedLines] = useState<NormalizedLine[]>([]);
   const [extractedJsons, setExtractedJsons] = useState<ExtractedJson[]>([]);
   const [apis, setApis] = useState<ApiDetail[]>([]);
+  const [userDetails, setUserDetails] = useState<UserDetail[]>([]);
   const [isParsing, setIsParsing] = useState(false);
   const [parseTime, setParseTime] = useState(0);
   const [parseError, setParseError] = useState<string | null>(null);
@@ -37,6 +39,7 @@ export function useParser(addToast: (msg: string, type: 'success' | 'warning' | 
     setNormalizedLines([]);
     setExtractedJsons([]);
     setApis([]);
+    setUserDetails([]);
     setParseTime(0);
     setParseError(null);
     setIsParsing(false);
@@ -79,6 +82,7 @@ export function useParser(addToast: (msg: string, type: 'success' | 'warning' | 
           setNormalizedLines(data.normalizedLines);
           setExtractedJsons(data.jsons);
           setApis(data.apis);
+          setUserDetails(data.userDetails || []);
           setParseTime(Math.round(data.duration));
           addToast(`Successfully parsed in ${Math.round(data.duration)}ms! ✨`, 'success');
         } else {
@@ -102,15 +106,20 @@ export function useParser(addToast: (msg: string, type: 'success' | 'warning' | 
         try {
           const startTime = performance.now();
           
-          const lines = normalizeLogs(text);
-          const jsons = extractJsonFromText(text);
+          const normalizedLines = normalizeLogs(text);
+          const joinedLines = joinContinuationLines(normalizedLines);
+          const joinedText = joinedLines.map(l => l.normalizedText).join('\n');
+          
+          const jsons = extractJsonFromText(text, joinedText);
           const apiDetails = extractApiDetails(text, jsons);
+          const userDets = extractUserDetails(text, jsons);
           
           const duration = performance.now() - startTime;
           
-          setNormalizedLines(lines);
+          setNormalizedLines(joinedLines);
           setExtractedJsons(jsons);
           setApis(apiDetails);
+          setUserDetails(userDets);
           setParseTime(Math.round(duration));
           setIsParsing(false);
         } catch (err) {
@@ -127,6 +136,7 @@ export function useParser(addToast: (msg: string, type: 'success' | 'warning' | 
     normalizedLines,
     extractedJsons,
     apis,
+    userDetails,
     isParsing,
     parseTime,
     parseError,

@@ -45,7 +45,7 @@ export function LogoBanner({ theme, onToggleTheme, onOpenShortcuts }: LogoBanner
         </button>
 
         <a 
-          href="https://github.com" 
+          href="https://github.com/PINaKey/LogJSON" 
           target="_blank" 
           rel="noopener noreferrer"
           className="btn btn-secondary btn-icon"
