@@ -1,0 +1,113 @@
+/* CSS Variable Tokens and Themes */
+
+:root {
+  /* Font Families */
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+  /* Border Radii */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-full: 9999px;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  --shadow-glow: 0 0 15px rgba(20, 184, 166, 0.15);
+
+  /* Transitions */
+  --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-normal: 250ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-slow: 350ms cubic-bezier(0.4, 0, 0.2, 1);
+  
+  /* Status Colors (Unified) */
+  --color-success: #10b981;
+  --color-success-bg: rgba(16, 185, 129, 0.1);
+  --color-warning: #f59e0b;
+  --color-warning-bg: rgba(245, 158, 11, 0.1);
+  --color-danger: #ef4444;
+  --color-danger-bg: rgba(239, 68, 68, 0.1);
+  --color-info: #3b82f6;
+  --color-info-bg: rgba(59, 130, 246, 0.1);
+
+  /* Method Colors */
+  --color-method-get: #10b981;
+  --color-method-post: #3b82f6;
+  --color-method-put: #f59e0b;
+  --color-method-delete: #ef4444;
+  --color-method-patch: #8b5cf6;
+  --color-method-other: #6b7280;
+}
+
+/* Dark Theme (Default) */
+:root, [data-theme="dark"] {
+  --color-bg: #090d16;
+  --color-bg-alt: #0e1626;
+  --color-surface: rgba(17, 25, 43, 0.7);
+  --color-surface-hover: rgba(25, 37, 62, 0.8);
+  --color-border: #1e293b;
+  --color-border-active: #14b8a6;
+  
+  /* Text Colors */
+  --color-text: #f8fafc;
+  --color-text-muted: #94a3b8;
+  --color-text-dim: #64748b;
+  
+  /* Accents */
+  --color-primary: #14b8a6; /* Teal */
+  --color-primary-hover: #0d9488;
+  --color-primary-glow: rgba(20, 184, 166, 0.3);
+  --color-accent: #8b5cf6; /* Purple */
+  --color-accent-hover: #7c3aed;
+  
+  /* Code Highlights (Dark Theme) */
+  --code-keyword: #ff7b72;
+  --code-string: #a5d6ff;
+  --code-number: #d2a8ff;
+  --code-boolean: #ff9e64;
+  --code-property: #79c0ff;
+  --code-null: #ff7b72;
+  --code-bg: #0d1117;
+
+  /* Glassmorphism settings */
+  --glass-bg: rgba(15, 23, 42, 0.45);
+  --glass-border: rgba(255, 255, 255, 0.05);
+}
+
+/* Light Theme Override */
+[data-theme="light"] {
+  --color-bg: #f8fafc;
+  --color-bg-alt: #f1f5f9;
+  --color-surface: rgba(255, 255, 255, 0.8);
+  --color-surface-hover: rgba(255, 255, 255, 0.95);
+  --color-border: #e2e8f0;
+  --color-border-active: #0d9488;
+  
+  /* Text Colors */
+  --color-text: #0f172a;
+  --color-text-muted: #475569;
+  --color-text-dim: #94a3b8;
+  
+  /* Accents */
+  --color-primary: #0d9488; /* Darker Teal for accessibility */
+  --color-primary-hover: #0f766e;
+  --color-primary-glow: rgba(13, 148, 136, 0.2);
+  --color-accent: #7c3aed;
+  --color-accent-hover: #6d28d9;
+  
+  /* Code Highlights (Light Theme) */
+  --code-keyword: #cf222e;
+  --code-string: #0a3069;
+  --code-number: #0550ae;
+  --code-boolean: #953800;
+  --code-property: #116329;
+  --code-null: #cf222e;
+  --code-bg: #f6f8fa;
+
+  /* Glassmorphism settings */
+  --glass-bg: rgba(255, 255, 255, 0.65);
+  --glass-border: rgba(0, 0, 0, 0.06);
+}
